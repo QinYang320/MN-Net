@@ -160,7 +160,7 @@ class HOII(nn.Module):
 
         return x
 
-class HOIIFormer(Module):
+class IHOIIFormer(Module):
     r"""TransformerEncoderLayer is made up of self-attn and feedforward network.
     This standard encoder layer is based on the paper "Attention Is All You Need".
     Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez,
@@ -180,7 +180,7 @@ class HOIIFormer(Module):
     """
 
     def __init__(self, d_model, nhead, bidirectional=True, dropout=0, activation="relu", gnconv_dim=32, gnconv_order=2,rate=1, T=True):
-        super(HOIIFormer, self).__init__()
+        super(IHOIIFormer, self).__init__()
         self.HOII = HOII(dim=gnconv_dim, order=gnconv_order, s=1.0 / 3.0)
         self.T = T
 
@@ -207,7 +207,7 @@ class HOIIFormer(Module):
     def __setstate__(self, state):
         if 'activation' not in state:
             state['activation'] = F.relu
-        super(HOIIFormer, self).__setstate__(state)
+        super(IHOIIFormer, self).__setstate__(state)
 
     def forward(self, src, src_mask=None, src_key_padding_mask=None):
         # type: (Tensor, Optional[Tensor], Optional[Tensor]) -> Tensor
@@ -221,6 +221,15 @@ class HOIIFormer(Module):
         """
 
         b, c, dim2, dim1 = src.shape
+        # The first FNN
+        self.gru1.flatten_parameters()
+        out, h_n = self.gru1(src)
+        del h_n
+        src2 = self.linear4(self.dropout4(self.activation1(out)))
+
+        src = src + self.dropout5(src2)
+        src = self.norm4(src)
+
 
         if self.T:
             src2 = self.HOII(src)
@@ -248,73 +257,7 @@ class HOIIFormer(Module):
         src = self.norm2(src)
         return src
 
-class DPIH(Module):
-
-    def __init__(self, d_model, nhead, bidirectional=True, dropout=0, activation="relu"):
-        super(DPIH, self).__init__()
-        self.self_attn = HOIIFormer(d_model, nhead, dropout=dropout)
-        self.gru1 = GRU(d_model, d_model * 2, 1, bidirectional=bidirectional)
-        self.dropout4 = Dropout(dropout)
-        self.dropout5 = Dropout(dropout)
-        self.norm4 = LayerNorm(d_model)
-        self.activation1 = _get_activation_fn(activation)
-        if bidirectional:
-            self.linear4 = Linear(d_model * 2 * 2, d_model)
-        else:
-            self.linear4 = Linear(d_model * 2, d_model)
-
-
-        self.gru = GRU(d_model, d_model*2, 1, bidirectional=bidirectional)
-        self.dropout = Dropout(dropout)
-        if bidirectional:
-            self.linear2 = Linear(d_model*2*2, d_model)
-        else:
-            self.linear2 = Linear(d_model*2, d_model)
-
-        self.norm1 = LayerNorm(d_model)
-        self.norm2 = LayerNorm(d_model)
-        self.dropout1 = Dropout(dropout)
-        self.dropout2 = Dropout(dropout)
-
-        self.activation = _get_activation_fn(activation)
-
-        self.mhldsa = MHLocalDenseSynthesizerAttention(nhead, d_model, dropout_rate=dropout, context_size=3)
-        self.norm3 = LayerNorm(d_model)
-        self.dropout3 = Dropout(dropout)
-
-    def __setstate__(self, state):
-        if 'activation' not in state:
-            state['activation'] = F.relu
-        super(HOIIFormer, self).__setstate__(state)
-
-    def forward(self, src, src_mask=None, src_key_padding_mask=None):
-        # type: (Tensor, Optional[Tensor], Optional[Tensor]) -> Tensor
-        r"""Pass the input through the encoder layer.
-        Args:
-            src: the sequnce to the encoder layer (required).
-            src_mask: the mask for the src sequence (optional).
-            src_key_padding_mask: the mask for the src keys per batch (optional).
-        Shape:
-            see the docs in Transformer class.
-        """
-        # The First FFN
-        self.gru1.flatten_parameters()
-        out, h_n = self.gru1(src)
-        del h_n
-        src2 = self.linear4(self.dropout4(self.activation1(out)))
-
-        src = src + self.dropout5(src2)
-        src = self.norm4(src)
-
-        #Hybrid Attention layer   HOII
-        src2 = self.self_attn(src, src, src, attn_mask=src_mask,
-                              key_padding_mask=src_key_padding_mask)[0]
-        src = src + self.dropout1(src2)
-        src = self.norm1(src)
-
-        return src
-
-class DPIH_2(nn.Module):
+class DPIH(nn.Module):
     """
     Deep duaL-path RNN.
     args:
@@ -329,7 +272,7 @@ class DPIH_2(nn.Module):
     """
 
     def __init__(self, input_size, output_size, dropout=0, num_layers=1):
-        super(DPIH_2, self).__init__()
+        super(DPIH, self).__init__()
 
         self.input_size = input_size
         self.output_size = output_size
@@ -345,8 +288,8 @@ class DPIH_2(nn.Module):
         self.row_norm = nn.ModuleList([])
         self.col_norm = nn.ModuleList([])
         for i in range(num_layers):
-            self.row_trans.append(HOIIFormer(d_model=input_size//2, nhead=4, dropout=dropout, bidirectional=True))
-            self.col_trans.append(HOIIFormer(d_model=input_size//2, nhead=4, dropout=dropout, bidirectional=True))
+            self.row_trans.append(IHOIIFormer(d_model=input_size//2, nhead=4, dropout=dropout, bidirectional=True))
+            self.col_trans.append(IHOIIFormer(d_model=input_size//2, nhead=4, dropout=dropout, bidirectional=True))
             self.row_norm.append(nn.GroupNorm(1, input_size//2, eps=1e-8))       #将input_size//2放入一组
             self.col_norm.append(nn.GroupNorm(1, input_size//2, eps=1e-8))
 
